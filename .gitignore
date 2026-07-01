@@ -1,0 +1,22 @@
+# Environment variables - never commit API keys
+.env
+
+# Python virtual environment
+venv/
+.venv/
+env/
+
+# Python cache
+__pycache__/
+*.py[cod]
+*.pyo
+
+# Jupyter checkpoints
+.ipynb_checkpoints/
+
+# macOS
+.DS_Store
+
+# FAISS index files (large binary files, regenerated at runtime)
+*.faiss
+*.pkl
