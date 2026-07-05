@@ -20,3 +20,4 @@ __pycache__/
 # FAISS index files (large binary files, regenerated at runtime)
 *.faiss
 *.pkl
+indexes/

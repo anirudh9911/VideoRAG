@@ -1,26 +1,22 @@
-# LangChain Core
+# Transcript fetching
+youtube-transcript-api
+
+# LangChain core + integrations
 langchain
 langchain-core
-
-# OpenAI Integration
+langchain-community
 langchain-openai
+langchain-text-splitters
+
+# OpenAI
 openai
 
-# Anthropic Integration
-langchain-anthropic
+# Vector store
+faiss-cpu
+tiktoken
 
-# Google Gemini (PaLM) Integration
-langchain-google-genai
-google-generativeai
+# UI
+streamlit
 
-# Hugging Face Integration
-langchain-huggingface
-transformers
-huggingface-hub
-
-# Environment Variable Management
+# Environment variables
 python-dotenv
-
-# Machine Learning Utilities
-numpy
-scikit-learn
