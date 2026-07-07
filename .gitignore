@@ -21,3 +21,4 @@ __pycache__/
 *.faiss
 *.pkl
 indexes/
+VideoRAG_Overview.html
