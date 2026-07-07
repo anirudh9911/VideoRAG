@@ -3,6 +3,9 @@ from langchain_core.prompts import PromptTemplate
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.runnables import RunnableParallel, RunnablePassthrough, RunnableLambda
 from langchain_community.vectorstores import FAISS
+from langchain_classic.retrievers.multi_query import MultiQueryRetriever
+from langchain_classic.retrievers.contextual_compression import ContextualCompressionRetriever
+from langchain_classic.retrievers.document_compressors import LLMChainExtractor
 
 
 def format_docs(retrieved_docs):
@@ -67,16 +70,48 @@ def build_chain(vector_store: FAISS):
     """
     llm = ChatOpenAI(model="gpt-4o-mini", temperature=0)
 
-    # Standard retriever for specific questions: fetches 4 diverse chunks
+    # Base MMR retriever for specific questions
     # fetch_k=10 means: first fetch 10 candidates from FAISS
     # k=4 means: from those 10, pick the 4 most diverse ones
     # lambda_mult=0.7 means: 70% relevance, 30% diversity in the selection
-    standard_retriever = vector_store.as_retriever(
+    base_retriever = vector_store.as_retriever(
         search_type="mmr",
         search_kwargs={"k": 4, "fetch_k": 10, "lambda_mult": 0.7},
     )
 
+    # Multi-query retriever wraps the base retriever.
+    # When invoked with a question, it:
+    #   1. Sends the question to the LLM and asks it to generate
+    #      3 alternative versions of the question
+    #   2. Runs a FAISS search for each of the 3 variants
+    #   3. Merges and deduplicates all results
+    # This means we search FAISS 3 times instead of once,
+    # catching chunks that match different phrasings of the same question.
+    multi_query_retriever = MultiQueryRetriever.from_llm(
+        retriever=base_retriever,
+        llm=llm,
+    )
+
+    # Contextual compression wraps the multi-query retriever.
+    # After multi-query fetches chunks, LLMChainExtractor reads each chunk
+    # and extracts ONLY the sentences relevant to the question.
+    # e.g. a 1000-char chunk becomes a 150-char extract.
+    # This reduces noise in the prompt and lowers token usage.
+    #
+    # The retriever stack is now:
+    # ContextualCompressionRetriever
+    #   └──► MultiQueryRetriever        (3 query variants)
+    #           └──► base_retriever     (MMR, k=4, fetch_k=10)
+    compressor = LLMChainExtractor.from_llm(llm)
+    standard_retriever = ContextualCompressionRetriever(
+        base_compressor=compressor,
+        base_retriever=multi_query_retriever,
+    )
+
     # Summary retriever: fetches more chunks to cover the whole video
+    # We don't wrap this in MultiQueryRetriever because summary questions
+    # already retrieve k=15 chunks — adding multi-query on top would be
+    # too many tokens and too slow for a broad "what is this video about?" question
     summary_retriever = vector_store.as_retriever(
         search_type="mmr",
         search_kwargs={"k": 15, "fetch_k": 30, "lambda_mult": 0.5},
@@ -103,10 +138,22 @@ Answer:""",
         """
         Picks the right retriever based on the question type.
         Summary questions get more chunks; specific questions get fewer.
+
+        For specific questions, we try compression first.
+        If compression returns empty docs (100% reduction case), we fall back
+        to uncompressed multi-query results so the LLM always has context.
         """
         if is_summary_question(question):
             return summary_retriever.invoke(question)
-        return standard_retriever.invoke(question)
+
+        # Try compressed retrieval first
+        compressed_docs = standard_retriever.invoke(question)
+
+        # Fallback: if compressor filtered everything out, use raw multi-query results
+        if not compressed_docs:
+            return multi_query_retriever.invoke(question)
+
+        return compressed_docs
 
     # RunnableParallel runs two things at the same time:
     # 1. "context": routes to right retriever, then formats the docs
